@@ -1,0 +1,7 @@
+Maixpy IDE:
+
+官网下载：
+https://dl.sipeed.com/shareURL/MAIX/MaixPy/ide/v0.2.5
+
+01Studio社区下载：
+https://bbs.01studio.cc/thread/76
