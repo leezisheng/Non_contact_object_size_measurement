@@ -1,15 +1,13 @@
 # ===================================引脚使用========================================= #
 # 激光测距模块：I2C2 P4-SCK P5-SDA
 # 舵机控制：TIM4 P7 P8
-#
-#
-#
-
+# 软件IIC控制OLED屏幕：sda--> P4, scl --> P3,频率 8MHz
 
 # ====================================导入库========================================== #
 
 # 基本库
 import sensor, image, time, pyb
+
 # I2C通信和激光测距模块
 from machine import I2C
 from vl53l1x import VL53L1X
@@ -19,8 +17,21 @@ from pyb import LED
 
 # 舵机控制库
 from pyb import Servo
+
 # PID算法库
 from pid import PID
+
+# 软件IIC
+from machine import SoftI2C,Pin
+
+# 外设相关
+import machine
+
+# 128 X 64 OLED屏幕
+from ssd1306x import SSD1306_I2C
+
+# 引脚相关
+from pyb import Pin
 
 # ====================================初始化========================================== #
 
@@ -61,6 +72,20 @@ pan_servo.angle(0) # 初始化底位置
 #tilt_pid = PID(p=0.05, i=0, imax=90) #脱机运行或者禁用图像传输，使用这个PID
 pan_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
 tilt_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
+
+# I2C 初始化： sda--> P4, scl --> P3,频率 8MHz
+i2c = SoftI2C(scl = Pin("P3") ,sda = Pin("P4"), freq = 80000)
+# OLED 显示屏初始化： 128*64 分辨率,OLED 的 I2C 地址是 0x3c
+oled = SSD1306_I2C(128, 64, i2c, addr=0x3c)
+
+# 扫描I2C总线下所有设备地址，并返回对应的列表
+add_list = i2c.scan()
+oled.fill(255)#清屏
+
+# 按键初始化
+# 将P6、p7作为阈值控制口 OUT_PP PULL_NONE
+KEY1 = Pin('P6', Pin.IN, Pin.PULL_UP)
+KEY2 = Pin('P9', Pin.IN, Pin.PULL_UP)
 
 # ====================================相关函数========================================== #
 
@@ -186,6 +211,36 @@ def led_control(x):
     if   (x&8)==0: ir_led.off()
     elif (x&8)==8: ir_led.on()
 
+# OLED屏幕显示函数
+def OLED_Show(v_Distance,SideLength,v_Flag_Class):
+    time.sleep_ms(1000)
+    #清屏
+    oled.fill(0)
+
+    oled.text("range: mm",0,0)
+    #OLED显示生效
+    oled.show()
+
+    oled.text(str(v_Distance),0,10)
+    #OLED显示生效
+    oled.show()
+
+    oled.text("SideLength:mm",0,20)
+    #OLED显示生效
+    oled.show()
+
+    oled.text(str(SideLength),0,30)
+    #OLED显示生效
+    oled.show()
+
+    oled.text("Object class:",0,40)
+    #OLED显示生效
+    oled.show()
+
+    oled.text(v_Flag_Class,0,50)
+    #OLED显示生效
+    oled.show()
+
 # ====================================全局变量========================================== #
 
 # 距离
@@ -223,6 +278,16 @@ ir_led    = LED(4)
 servo_angle_count = 0
 # 工作模式
 Work_Mode = 0
+# 测量次数：满十次计算平均值
+measure_times_count = 0
+# 尺寸数组：用于滤波
+SideLength_list = [0,0,0,0,0,0,0,0,0,0]
+# 尺寸总和
+SideLength_sum = 0
+# KEY1按下标志
+
+# KEY2按下标志
+
 
 # ===================================工作模式=========================================== #
 # 二维物体尺寸测量： 第一题、第二题
@@ -250,10 +315,18 @@ def object_2D_Detect(img):
         led_control(1)
         time.sleep_ms(100)
         led_control(0)
-        print("range: mm ", v_Distance)
-        print("SideLength:mm",SideLength)
-        print("Object class:",v_Flag_Class)
 
+        add_list = i2c.scan()
+        if len(add_list) >= 1:
+            try:
+                OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                print("range: mm ", v_Distance)
+                print("SideLength:mm",SideLength)
+                print("Object class:",v_Flag_Class)
+                # 绿灯亮起：测量完成
+                led_control(2)
+            except:
+                print("The OLED screen has unstable power supply")
     elif v_Flag_Class == "rectangular":
         Object_cx,Object_cy,Object_w,Object_h,Flag = Ret2D_Detect(color_threshold,img)
         v_Distance = Get_Distance()
@@ -262,9 +335,18 @@ def object_2D_Detect(img):
         led_control(1)
         time.sleep_ms(100)
         led_control(0)
-        print("range: mm ", v_Distance)
-        print("SideLength:mm",SideLength)
-        print("Object class:",v_Flag_Class)
+
+        add_list = i2c.scan()
+        if len(add_list) >= 1:
+            try:
+                OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                print("range: mm ", v_Distance)
+                print("SideLength:mm",SideLength)
+                print("Object class:",v_Flag_Class)
+                # 绿灯亮起：测量完成
+                led_control(2)
+            except:
+                print("The OLED screen has unstable power supply")
     elif v_Flag_Class == "triangle":
         Object_cx,Object_cy,Object_w,Object_h,Flag = Triangle2D_Detect(color_threshold,img)
         v_Distance = Get_Distance()
@@ -273,13 +355,21 @@ def object_2D_Detect(img):
         led_control(1)
         time.sleep_ms(100)
         led_control(0)
-        print("range: mm ", v_Distance)
-        print("SideLength:mm",SideLength)
-        print("Object class:",v_Flag_Class)
+
+        add_list = i2c.scan()
+        if len(add_list) >= 1:
+            try:
+                OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                print("range: mm ", v_Distance)
+                print("SideLength:mm",SideLength)
+                print("Object class:",v_Flag_Class)
+                # 绿灯亮起：测量完成
+                led_control(2)
+            except:
+                print("The OLED screen has unstable power supply")
     else:
         Show_Str("Could not find Object")
         print("未检测到任何物体")
-
 
 # ====================================主函数============================================ #
 
@@ -292,6 +382,13 @@ while(True):
     clock.tick()
     # 畸变矫正
     img = sensor.snapshot().lens_corr(1.8)
+
+    # 按键1被按下，Work_Mode = 1
+    KEY1_Flag = KEY1.value()
+    if(KEY1_Flag == 0):
+        time.sleep_ms(20)
+        if(KEY1_Flag == 0):
+            Work_Mode = 1
 
     if(Work_Mode == 0):
         pan_servo.angle(60)
@@ -347,9 +444,18 @@ while(True):
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Circle2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
-                    print("range: mm ", v_Distance)
-                    print("SideLength:mm",SideLength)
-                    print("Object class:",v_Flag_Class)
+
+                    add_list = i2c.scan()
+                    if len(add_list) >= 1:
+                        try:
+                            OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                            print("range: mm ", v_Distance)
+                            print("SideLength:mm",SideLength)
+                            print("Object class:",v_Flag_Class)
+                            # 绿灯亮起：测量完成
+                            led_control(2)
+                        except:
+                            print("The OLED screen has unstable power supply")
                 elif v_Flag_Class == "rectangular":
                     # 输出尺寸
                     led_control(1)
@@ -358,10 +464,18 @@ while(True):
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Ret2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
-                    print("Object_w:(mm)",Object_w,"Object_h:(mm)",Object_h)
-                    print("range: mm ", v_Distance)
-                    print("SideLength:mm",SideLength)
-                    print("Object class:",v_Flag_Class)
+
+                    add_list = i2c.scan()
+                    if len(add_list) >= 1:
+                        try:
+                            OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                            print("range: mm ", v_Distance)
+                            print("SideLength:mm",SideLength)
+                            print("Object class:",v_Flag_Class)
+                            # 绿灯亮起：测量完成
+                            led_control(2)
+                        except:
+                            print("The OLED screen has unstable power supply")
                 elif v_Flag_Class == "triangle":
                     # 输出尺寸
                     led_control(1)
@@ -370,9 +484,18 @@ while(True):
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Triangle2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
-                    print("range: mm ", v_Distance)
-                    print("SideLength:mm",SideLength)
-                    print("Object class:",v_Flag_Class)
+
+                    add_list = i2c.scan()
+                    if len(add_list) >= 1:
+                        try:
+                            OLED_Show(int(v_Distance),int(SideLength),v_Flag_Class)
+                            print("range: mm ", v_Distance)
+                            print("SideLength:mm",SideLength)
+                            print("Object class:",v_Flag_Class)
+                            # 绿灯亮起：测量完成
+                            led_control(2)
+                        except:
+                            print("The OLED screen has unstable power supply")
                 else:
                     Show_Str("Could not find Object")
                     print("未检测到任何物体")
