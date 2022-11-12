@@ -1,7 +1,7 @@
 # ===================================引脚使用========================================= #
 # 激光测距模块：I2C2 P4-SCK P5-SDA
 # 舵机控制：TIM4 P7 P8
-# 软件IIC控制OLED屏幕：sda--> P4, scl --> P3,频率 8MHz
+# 软件IIC控制OLED屏幕：sda--> P2, scl --> P3,频率 8MHz
 
 # ====================================导入库========================================== #
 
@@ -73,8 +73,8 @@ pan_servo.angle(0) # 初始化底位置
 pan_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
 tilt_pid = PID(p=0.1, i=0, imax=90)#在线调试使用这个PID
 
-# I2C 初始化： sda--> P4, scl --> P3,频率 8MHz
-i2c = SoftI2C(scl = Pin("P3") ,sda = Pin("P4"), freq = 80000)
+# I2C 初始化： sda--> P2, scl --> P3,频率 8MHz
+i2c = SoftI2C(scl = Pin("P3") ,sda = Pin("P2"), freq = 80000)
 # OLED 显示屏初始化： 128*64 分辨率,OLED 的 I2C 地址是 0x3c
 oled = SSD1306_I2C(128, 64, i2c, addr=0x3c)
 
@@ -95,10 +95,13 @@ def Get_Distance():
     time.sleep_ms(50)
     return distance.read()
 
-# 距离常数拟合曲线
-def Get_K_Curve(Dis,Cw,Ch):
-    K = 1/27
-    return K
+# 得到真实边长
+def Get_K_Curve(Dis,Cw):
+    temp_D = 0
+
+    temp_D = 0.579*Cw+(-0.0114)*Dis+(-3.16518511e-03)*Cw*Cw+(7.17399445e-03)*Cw*Dis+(4.68529728e-06)*Dis*Dis
+
+    return temp_D
 
 # 形状分类
 def Shape_Class(color_threshold,img,roi):
@@ -185,13 +188,13 @@ def Triangle2D_Detect(color_threshold,img):
 def Size_Calculation(Dis,Cw,Ch,Flag):
     SideLength = 0
     if Flag == "circle":
-        SideLength = Dis*((Cw+Ch)/2)*Get_K_Curve(Dis,Cw,Ch)*2*PI
+        SideLength = Get_K_Curve(Dis,Cw)*PI
         return SideLength
     elif Flag == "rectangular":
-        SideLength = Dis*Cw*Get_K_Curve(Dis,Cw,Ch)*2+Dis*Ch*Get_K_Curve(Dis,Cw,Ch)*2
+        SideLength = Get_K_Curve(Dis,Cw)*2+Get_K_Curve(Dis,Ch)*2
         return SideLength
     elif Flag == "triangle":
-        SideLength = Dis*Get_K_Curve(Dis,Cw,Ch)*((Cw+Ch)/2)*3
+        SideLength = Get_K_Curve(Dis,Cw)*3.464
     return SideLength
 
 # 字符绘制
@@ -248,7 +251,7 @@ v_Distance = 0
 # 颜色阈值
 red_threshold   = [4, 30, 5, 127, -1, 127]
 grean_threshold = [4, 43, -82, -15, 13, 58]
-blue_threshold  = [4, 90, -70, 127, -64, -23]
+blue_threshold  = [6, 89, -70, 127, -84, -22]
 black_threshold = [18, 36, -66, -21, -37, 36]
 white_threshold = [19, 100, -7, 127, 4, 127]
 # 颜色阈值列表
@@ -294,7 +297,7 @@ SideLength_sum = 0
 def object_2D_Detect(img):
     # 蓝绿灯闪烁
     led_control(2)
-    time.sleep_ms(50)
+    time.sleep_ms(10)
     led_control(4)
 
     # 像素颜色统计
@@ -313,7 +316,6 @@ def object_2D_Detect(img):
         SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
         # 输出尺寸
         led_control(1)
-        time.sleep_ms(100)
         led_control(0)
 
         add_list = i2c.scan()
@@ -333,7 +335,6 @@ def object_2D_Detect(img):
         SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
         # 输出尺寸
         led_control(1)
-        time.sleep_ms(100)
         led_control(0)
 
         add_list = i2c.scan()
@@ -353,7 +354,6 @@ def object_2D_Detect(img):
         SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
         # 输出尺寸
         led_control(1)
-        time.sleep_ms(100)
         led_control(0)
 
         add_list = i2c.scan()
@@ -391,7 +391,8 @@ while(True):
             Work_Mode = 1
 
     if(Work_Mode == 0):
-        pan_servo.angle(60)
+        pan_servo.angle(65)
+        tilt_servo.angle(100)
         object_2D_Detect(img)
 
     elif(Work_Mode == 1):
@@ -424,7 +425,7 @@ while(True):
             tilt_servo.angle(tilt_servo.angle()+tilt_output) #上面舵机转动的角度为上一个角度-现在的输出(偏差)角度  因为是倒转 所以是加
             #print("tilt_servo.angle:",tilt_servo.angle())
 
-            if( -20 <= pan_error <= 20 and -20 <= tilt_error <= 20):
+            if( -30 <= pan_error <= 30 and -30 <= tilt_error <= 30):
 
                 # 像素颜色统计
                 Center_Statistics = img.get_statistics(roi=(max_blob.x(), max_blob.y(), max_blob.w(), max_blob.h()))
@@ -439,8 +440,6 @@ while(True):
                 if v_Flag_Class == "circle":
                     # 输出尺寸
                     led_control(1)
-                    time.sleep_ms(100)
-                    led_control(0)
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Circle2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
@@ -456,11 +455,10 @@ while(True):
                             led_control(2)
                         except:
                             print("The OLED screen has unstable power supply")
+                    led_control(0)
                 elif v_Flag_Class == "rectangular":
                     # 输出尺寸
                     led_control(1)
-                    time.sleep_ms(100)
-                    led_control(0)
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Ret2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
@@ -476,11 +474,10 @@ while(True):
                             led_control(2)
                         except:
                             print("The OLED screen has unstable power supply")
+                    led_control(0)
                 elif v_Flag_Class == "triangle":
                     # 输出尺寸
                     led_control(1)
-                    time.sleep_ms(100)
-                    led_control(0)
                     Object_cx,Object_cy,Object_w,Object_h,Flag = Triangle2D_Detect(color_threshold,img)
                     v_Distance = Get_Distance()
                     SideLength = Size_Calculation(v_Distance,Object_w,Object_h,Flag)
@@ -496,6 +493,7 @@ while(True):
                             led_control(2)
                         except:
                             print("The OLED screen has unstable power supply")
+                    led_control(0)
                 else:
                     Show_Str("Could not find Object")
                     print("未检测到任何物体")
@@ -507,7 +505,6 @@ while(True):
                 else:
                     color_count = color_count + 1
             tilt_servo.angle(90)
-            time.sleep_ms(50)
             servo_angle_count = servo_angle_count + 1
             pan_servo.angle(servo_angle_count)
 
